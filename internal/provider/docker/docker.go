@@ -173,15 +173,25 @@ func (p *Provider) Create(ctx context.Context, opts *provider.CreateOptions) (pr
 
 // ensureImage pulls the image if it doesn't exist locally.
 func (p *Provider) ensureImage(ctx context.Context, imageName string) error {
-	// Check if image exists
+	// Check if image exists locally
 	_, err := p.client.ImageInspect(ctx, imageName)
 	if err == nil {
 		return nil // Image exists
 	}
 
+	if !client.IsErrNotFound(err) {
+		// If error is not "not found", it might be connection error
+		if strings.Contains(err.Error(), "Cannot connect") || strings.Contains(err.Error(), "connection refused") {
+			return fmt.Errorf("docker connection failed: %w\n\nTroubleshooting:\n  - Is the Docker daemon running?\n  - Do you have permission to access /var/run/docker.sock?", err)
+		}
+	}
+
 	// Pull image
 	reader, err := p.client.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
+		if strings.Contains(err.Error(), "Cannot connect") || strings.Contains(err.Error(), "connection refused") {
+			return fmt.Errorf("docker connection failed: %w\n\nTroubleshooting:\n  - Is the Docker daemon running?\n  - Do you have permission to access /var/run/docker.sock?", err)
+		}
 		return fmt.Errorf("pull image: %w", err)
 	}
 	defer reader.Close()
@@ -298,6 +308,9 @@ func (i *Instance) Execute(ctx context.Context, code string, opts *executor.Exec
 	// Run the code
 	result, err := i.runExec(execCtx, cmd, opts)
 	if err != nil {
+		if execCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("execution timed out after %v: %w\n\nTip: You can increase the timeout using the -timeout flag (e.g., -timeout 10m)", opts.Timeout, err)
+		}
 		return nil, err
 	}
 

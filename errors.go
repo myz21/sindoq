@@ -39,6 +39,20 @@ var (
 	ErrProviderNotRegistered = errors.New("provider not registered")
 )
 
+// ProviderNotFoundError supplies suggestions when a provider is missing.
+type ProviderNotFoundError struct {
+	Name      string
+	Available []string
+}
+
+func (e *ProviderNotFoundError) Error() string {
+	msg := fmt.Sprintf("provider %q not found\n\nAvailable providers:\n", e.Name)
+	for _, p := range e.Available {
+		msg += fmt.Sprintf("  - %s\n", p)
+	}
+	return msg
+}
+
 // SandboxError wraps errors with context.
 type SandboxError struct {
 	Op        string // Operation that failed

@@ -28,6 +28,19 @@ func NewDefaultFactory() *SandboxFactory {
 
 // CreateSandbox creates a sandbox using the specified provider.
 func (f *SandboxFactory) CreateSandbox(ctx context.Context, providerName string, providerConfig any, opts *provider.CreateOptions) (provider.Instance, error) {
+	if !f.registry.IsRegistered(providerName) {
+		available := f.registry.Available()
+		msg := fmt.Sprintf("provider %q not found\n\nAvailable providers:\n", providerName)
+		for _, p := range available {
+			if p == "docker" {
+				msg += fmt.Sprintf("  - %s (default)\n", p)
+			} else {
+				msg += fmt.Sprintf("  - %s\n", p)
+			}
+		}
+		return nil, fmt.Errorf(msg)
+	}
+
 	p, err := f.registry.Get(providerName, providerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
