@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -51,6 +52,7 @@ func main() {
 	language := flag.String("lang", "", "Language (auto-detected if not specified)")
 	timeout := flag.Duration("timeout", 5*time.Minute, "Execution timeout")
 	stream := flag.Bool("stream", false, "Stream output in real-time")
+	jsonFormat := flag.Bool("json", false, "Output in JSON format")
 	file := flag.String("file", "", "Execute code from file")
 	detect := flag.Bool("detect", false, "Only detect language, don't execute")
 	listLangs := flag.Bool("list-languages", false, "List supported languages")
@@ -72,6 +74,7 @@ Flags:
 		fmt.Fprintf(os.Stderr, `
 Examples:
   sindoq 'print("Hello")'
+  sindoq --json 'print("Hello")'
   sindoq -file script.py
   sindoq 'console.log("Hi")' -lang javascript
   sindoq -stream 'for i in range(5): print(i)'
@@ -114,7 +117,7 @@ Environment Variables:
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	if err := executeCode(ctx, code, *provider, *language, *stream); err != nil {
+	if err := executeCode(ctx, code, *provider, *language, *stream, *jsonFormat); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -172,7 +175,7 @@ func listLanguages() {
 	}
 }
 
-func executeCode(ctx context.Context, code, providerName, language string, stream bool) error {
+func executeCode(ctx context.Context, code, providerName, language string, stream, jsonFormat bool) error {
 	if language == "" {
 		detector := langdetect.New()
 		result := detector.Detect(code, langdetect.DefaultDetectOptions())
@@ -210,7 +213,9 @@ func executeCode(ctx context.Context, code, providerName, language string, strea
 		execOpts = append(execOpts, sindoq.WithLanguage(language))
 	}
 
-	if stream {
+	start := time.Now()
+
+	if stream && !jsonFormat {
 		return sb.ExecuteStream(ctx, code, func(e *executor.StreamEvent) error {
 			switch e.Type {
 			case executor.StreamStdout:
@@ -229,11 +234,33 @@ func executeCode(ctx context.Context, code, providerName, language string, strea
 		return err
 	}
 
-	if result.Stdout != "" {
-		fmt.Print(result.Stdout)
-	}
-	if result.Stderr != "" {
-		fmt.Fprint(os.Stderr, result.Stderr)
+	if jsonFormat {
+		output := struct {
+			ExitCode   int    `json:"exit_code"`
+			Stdout     string `json:"stdout"`
+			Stderr     string `json:"stderr"`
+			DurationMs int64  `json:"duration_ms"`
+			Language   string `json:"language"`
+		}{
+			ExitCode:   result.ExitCode,
+			Stdout:     result.Stdout,
+			Stderr:     result.Stderr,
+			DurationMs: time.Since(start).Milliseconds(),
+			Language:   language,
+		}
+
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(output); err != nil {
+			return err
+		}
+	} else {
+		if result.Stdout != "" {
+			fmt.Print(result.Stdout)
+		}
+		if result.Stderr != "" {
+			fmt.Fprint(os.Stderr, result.Stderr)
+		}
 	}
 
 	if result.ExitCode != 0 {
